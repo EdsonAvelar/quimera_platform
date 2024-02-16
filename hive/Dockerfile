@@ -1,38 +1,66 @@
-FROM openjdk:8u342-jre
+FROM python:3.9-slim
+COPY --from=openjdk:8-jre-slim /usr/local/openjdk-8 /usr/local/openjdk-8
 
-RUN apt-get update \
- && apt-get install --assume-yes python3 python3-pip procps \
- && apt-get clean
+ENV HADOOP_VERSION=3.3.6
+ENV HIVE_METASTORE_VERSION=3.0.0
+ENV POSTGRES_CONNECTOR_VERSION=42.2.18
 
-RUN pip3 install pyspark~=3.3.1 pandas~=1.5.3
+# Set necessary environment variables.
+ENV HADOOP_HOME="/opt/hadoop"
+ENV PATH="/opt/spark/bin:/opt/hadoop/bin:${PATH}"
+ENV DATABASE_DRIVER=org.postgresql.Driver
+ENV DATABASE_TYPE=postgres
+ENV DATABASE_TYPE_JDBC=postgresql
+ENV DATABASE_PORT=5432
+ENV JAVA_HOME=/usr/local/openjdk-8
 
-RUN apt-get update \
- && apt-get install --assume-yes telnet \
- && apt-get clean
+#COPY binaries/hive-standalone-metastore-$HIVE_METASTORE_VERSION-bin.tar.gz /
+#COPY postgresql-$POSTGRES_CONNECTOR_VERSION.jar /opt/postgresql-$POSTGRES_CONNECTOR_VERSION.jar
+RUN apt-get update -y
+RUN apt-get install -y curl net-tools --no-install-recommends
 
-WORKDIR /opt
+###############
+##  HADOOP
+###############
+#RUN wget https://archive.apache.org/dist/hadoop/common/hadoop-$HADOOP_VERSION/hadoop-$HADOOP_VERSION.tar.gz
+COPY binaries/hadoop-$HADOOP_VERSION.tar.gz /
+RUN tar xf hadoop-$HADOOP_VERSION.tar.gz -C /opt
+RUN ln -s /opt/hadoop-$HADOOP_VERSION /opt/hadoop
+RUN rm hadoop-$HADOOP_VERSION.tar.gz
+RUN rm -r /opt/hadoop/share/doc
+RUN ln -s /opt/hadoop-$HADOOP_VERSION /opt/hadoop
+RUN ln -s /opt/hadoop/share/hadoop/tools/lib/hadoop-aws* /opt/hadoop/share/hadoop/common/lib/
+RUN ln -s /opt/hadoop/share/hadoop/tools/lib/aws-java-sdk* /opt/hadoop/share/hadoop/common/lib/
 
-ENV HADOOP_VERSION=3.2.0
-ENV METASTORE_VERSION=3.0.0
 
-ENV HADOOP_HOME=/opt/hadoop-${HADOOP_VERSION}
-ENV HIVE_HOME=/opt/apache-hive-metastore-${METASTORE_VERSION}-bin
+###############
+##  METASTORE
+###############
+COPY binaries/hive-standalone-metastore-$HIVE_METASTORE_VERSION-bin.tar.gz /
+RUN tar xf hive-standalone-metastore-$HIVE_METASTORE_VERSION-bin.tar.gz  -C /opt/
+RUN ln -s /opt/apache-hive-metastore-$HIVE_METASTORE_VERSION-bin /opt/hive-metastore
+RUN rm hive-standalone-metastore-$HIVE_METASTORE_VERSION-bin.tar.gz
+RUN rm /opt/apache-hive-metastore-$HIVE_METASTORE_VERSION-bin/lib/guava-19.0.jar
+RUN cp /opt/hadoop-$HADOOP_VERSION/share/hadoop/hdfs/lib/guava-27.0-jre.jar /opt/apache-hive-metastore-$HIVE_METASTORE_VERSION-bin/lib/
 
-RUN curl -L https://apache.org/dist/hive/hive-standalone-metastore-${METASTORE_VERSION}/hive-standalone-metastore-${METASTORE_VERSION}-bin.tar.gz | tar zxf - && \
-    curl -L https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz | tar zxf - && \
-    curl -L https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-8.0.19.tar.gz | tar zxf - && \
-    cp mysql-connector-java-8.0.19/mysql-connector-java-8.0.19.jar ${HIVE_HOME}/lib/ && \
-    rm -rf  mysql-connector-java-8.0.19
+###############
+##  POSTGRESS CONNECTION
+###############
+COPY binaries/postgresql-$POSTGRES_CONNECTOR_VERSION.jar /opt/
+RUN ln -s /opt/postgresql-$POSTGRES_CONNECTOR_VERSION.jar /opt/hadoop/share/hadoop/common/lib/
+RUN ln -s /opt/postgresql-$POSTGRES_CONNECTOR_VERSION.jar /opt/hive-metastore/lib/
 
-COPY metastore-site.xml ${HIVE_HOME}/conf
-COPY entrypoint.sh /entrypoint.sh
+###############
+##  CLEAN
+###############
+RUN apt-get purge -y --auto-remove && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -r hive --gid=1000 && \
-    useradd -r -g hive --uid=1000 -d ${HIVE_HOME} hive && \
-    chown hive:hive -R ${HIVE_HOME} && \
-    chown hive:hive /entrypoint.sh && chmod +x /entrypoint.sh
+COPY run.sh run.sh
 
-USER hive
-EXPOSE 9083
+COPY configs/hive-site.xml /opt/hadoop/etc/hadoop/hive-site.xml
+COPY configs/metastore-site.xml /opt/hive-metastore/conf/metastore-site.xml
+COPY configs/core-site.xml /opt/hadoop/etc/hadoop/core-site.xml
 
-ENTRYPOINT ["sh", "-c", "/entrypoint.sh"]
+CMD [ "./run.sh" ]
+HEALTHCHECK CMD [ "sh", "-c", "netstat -ln | grep 9083" ]
+

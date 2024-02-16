@@ -2,10 +2,10 @@
 
 echo "History server is sarting ...."
 
-export SPARK_VERSION=3.4.2
+#export SPARK_VERSION=3.4.2
 
 start-history-server.sh
-start-connect-server.sh --packages org.apache.spark:spark-connect_2.12:$SPARK_VERSION
+#start-connect-server.sh --packages org.apache.spark:spark-connect_2.12:$SPARK_VERSION
 
 echo "$(hostname -i) spark-master" >> /etc/hosts
 

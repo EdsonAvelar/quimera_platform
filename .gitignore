@@ -138,7 +138,9 @@ superset/.setup-complete
 *.gz
 ./.storage/*
 data/*
-spark-3.4.2-bin-hadoop3.tgz
-apache-hive-3.4.2-bin.tar.gz
+spark-*-bin-hadoop3.tgz
+apache-hive-*-bin.tar.gz
 ./*
 .storage
+
+binaries/

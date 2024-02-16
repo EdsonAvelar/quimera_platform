@@ -1,23 +1,21 @@
 version: "3"
 
 services:
-  airflow:
-    build: ./airflow
-    restart: unless-stopped
-    environment:
-      - AIRFLOW__CORE__FERNET_KEY=PeszOD9t6wKNdNONTGh-k4qsYbsGHQ8CSqTQZlqPCDk=
-      - AIRFLOW_HOME=/opt/airflow
-    ports:
-      - 8000:8000
-    volumes:
-      - ./.airflow/dags:/opt/airflow/dags
-    command: sleep infinity
+  # airflow:
+  #   build: ./airflow
+  #   restart: unless-stopped
+  #   environment:
+  #     - AIRFLOW__CORE__FERNET_KEY=PeszOD9t6wKNdNONTGh-k4qsYbsGHQ8CSqTQZlqPCDk=
+  #     - AIRFLOW_HOME=/opt/airflow
+  #   ports:
+  #     - 8000:8000
+  #   volumes:
+  #     - ./.airflow/dags:/opt/airflow/dags
+  #   command: sleep infinity
 
   spark-master:
     build: ./spark
     restart: unless-stopped
-    depends_on:
-      - mariadb
     ports:
       - 4040:4040
       - 7078:7078
@@ -36,6 +34,7 @@ services:
 
   minio:
     image: "minio/minio:latest"
+    container_name: minio1
     volumes:
       - ./.storage/minio:/data
     ports:
@@ -57,59 +56,139 @@ services:
       timeout: 20s
       retries: 3
 
-  mariadb:
-    image: mariadb:latest
-    ports:
-      - 3306:3306
+  # mariadb:
+  #   image: mariadb:latest
+  #   ports:
+  #     - 3306:3306
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: admin
+  #     MYSQL_USER: admin
+  #     MYSQL_PASSWORD: admin
+  #     MYSQL_DATABASE: metastore_db
+
+  postgres:
+    image: postgres:14-alpine
+    container_name: postgres
     environment:
-      MYSQL_ROOT_PASSWORD: admin
-      MYSQL_USER: admin
-      MYSQL_PASSWORD: admin
-      MYSQL_DATABASE: metastore_db
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "psql",
+          "-U",
+          "${POSTGRES_USER}",
+          "${POSTGRES_DB}"
+        ]
+    ports:
+      - '5432:5432'
+
+  # localstack:
+  #   image: localstack/localstack:1.1
+  #   ports:
+  #     - ${LOCALSTACK_PORT}:${LOCALSTACK_PORT}
+  #   environment:
+  #     - DOCKER_HOST=unix:///var/run/docker.sock
+  #   volumes:
+  #     - "/tmp/localstack:/var/lib/localstack"
+  #     - "/var/run/docker.sock:/var/run/docker.sock"
+
+  # s3_setup:
+  #   image: localstack/localstack:1.1
+  #   depends_on:
+  #     localstack:
+  #       condition: service_healthy
+  #   entrypoint: ["aws", "--endpoint-url", "http://localstack:4566", "s3api", "create-bucket", "--bucket", "${S3_BUCKET}"]
+  #   environment:
+  #     - AWS_ACCESS_KEY_ID
+  #     - AWS_SECRET_ACCESS_KEY
 
   hive:
     build: ./hive
-    image: hive-metastore:latest
-    restart: unless-stopped
-    ports:
-      - 9083:9083
+    container_name: hive-metastore
     depends_on:
-      - mariadb
-
-  # presto:
-  #   build: ./presto
-  #   ports:
-  #     - "8888:8888"
-  #   volumes:
-  #     - .storage/presto/coordinator_config.properties:/opt/presto/etc/config.properties
-  #     - .storage/presto/etc/catalog:/opt/presto/etc/catalog
-
-  # presto-worker:
-  #   build: ./presto
-  #   volumes:
-  #     - .storage/presto/worker_config.properties:/opt/presto/etc/config.properties
-  #     - .storage/presto/etc/catalog:/opt/presto/etc/catalog
-
-  superset:
-    image: arezamoosavi/superset:latest
-    container_name: superset
+      postgres:
+        condition: service_healthy
     environment:
-      ADMIN_USERNAME: admin
-      ADMIN_PWD: admin
+      - DATABASE_HOST=postgres
+      - DATABASE_DB=${POSTGRES_DB}
+      - DATABASE_USER=${POSTGRES_USER}
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - S3_ENDPOINT_URL=http://minio:${LOCALSTACK_PORT}
+      - S3_BUCKET
+      - S3_PREFIX
     ports:
-      - 8088:8088
-    volumes:
-      - ./.storage/superset:/superset
-    restart: unless-stopped
+      - 9083:9083 # Metastore Server
+      #- 9870:9870 #Hadoop HDFS Web UI
+      #- 8088:8088 #Hadoop Resource Manager
+      #- 8042:8042 #Hadoop Node Manage
+
+
+      # hive2:
+      #   build: ./hive
+      #   image: hive-metastore:latest
+      #   restart: unless-stopped
+      #   ports:
+      #     - 9083:9083
+      #     - 9870:9870 #Hadoop HDFS Web UI
+      #     - 8088:8088 #Hadoop Resource Manager
+      #     - 8042:8042 #Hadoop Node Manager
+
+      #   depends_on:
+      #     - mariadb
+      #   command: sleep infinity
+
+      # presto:
+      #   build: ./presto
+      #   ports:
+      #     - "8888:8888"
+      #   volumes:
+      #     - .storage/presto/coordinator_config.properties:/opt/presto/etc/config.properties
+      #     - .storage/presto/etc/catalog:/opt/presto/etc/catalog
+
+      # presto-worker:
+      #   build: ./presto
+      #   volumes:
+      #     - .storage/presto/worker_config.properties:/opt/presto/etc/config.properties
+      #     - .storage/presto/etc/catalog:/opt/presto/etc/catalog
+
+      # superset:
+      #   image: arezamoosavi/superset:latest
+      #   container_name: superset
+      #   environment:
+      #     ADMIN_USERNAME: admin
+      #     ADMIN_PWD: admin
+      #   ports:
+      #     - 8088:8088
+      #   volumes:
+      #     - ./.storage/superset:/superset
+      #   restart: unless-stopped
+
+      # jupyter:
+      #   image: jupyter/pyspark-notebook:latest
+      #   container_name: jupyter
+      #   depends_on:
+      #     - spark-worker
+      #   environment:
+      #     JUPYTER_ENABLE_LAB: "yes"
+      #     PYSPARK_PYTHON: /opt/conda/bin/python
+      #     PYSPARK_DRIVER_PYTHON: /opt/conda/bin/python
+      #   volumes:
+      #     - ./.storage/juyter:/home/jovyan
+      #   ports:
+      #     - '8888:8888'
 
   jupyter:
-    image: jupyter/pyspark-notebook
-    container_name: jupyter
-    depends_on:
-      - spark-worker
-    environment:
-      JUPYTER_ENABLE_LAB: "yes"
+    build: ./jupyter
+    restart: unless-stopped
     volumes:
       - ./.storage/juyter:/home/jovyan
     ports:
       - '8888:8888'
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+    command: jupyter lab --no-browser --allow-root --ip 0.0.0.0 --port 8888 /notebooks
